@@ -16,11 +16,9 @@ Resources:
     Properties:
       Code:
         ZipFile: |
-          console.log('Loading DynamoDB Lambda function');
           var AWS = require('aws-sdk');
           var dynamo = new AWS.DynamoDB.DocumentClient();
           exports.handler = function(event, context, callback) {
-          //console.log('Received event:', JSON.stringify(event, null, 2));
           var operation = event.operation;
           if (event.tableName) {
             event.payload.TableName = event.tableName;
@@ -124,10 +122,11 @@ Resources:
   APIGatewayMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
+      AuthorizerId: !Ref ApiGatewayAuthorizer
+      AuthorizationType: COGNITO_USER_POOLS
       RestApiId: !Ref APIGatewayRestAPI
       ResourceId: !Ref APIGatewayResource
       HttpMethod: POST
-      AuthorizationType: NONE
       MethodResponses:
         - StatusCode: 200
       Integration:
