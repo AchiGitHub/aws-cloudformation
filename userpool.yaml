@@ -16,55 +16,36 @@ Resources:
     Properties:
       Code:
         ZipFile: |
-          var AWS = require('aws-sdk');
-          var dynamo = new AWS.DynamoDB.DocumentClient();
-          exports.handler = function(event, context, callback) {
-          var operation = event.operation;
-          if (event.tableName) {
-            event.payload.TableName = event.tableName;
-          }
-          switch (operation) {
-                case 'create':
-                    dynamo.put(event.payload, callback);
-                    break;
-                case 'read':
-                    dynamo.get(event.payload, callback);
-                    break;
-                case 'update':
-                    dynamo.update(event.payload, callback);
-                    break;
-                case 'delete':
-                    dynamo.delete(event.payload, callback);
-                    break;
-                case 'list':
-                    dynamo.scan(event.payload, callback);
-                    break;
-                default:
-                    callback('Unknown operation: ${operation}');
-          }
+          exports.handler = async (event) => {
+              // TODO implement
+              const response = {
+                  statusCode: 200,
+                  body: JSON.stringify('Hello from Lambda!'),
+              };
+              return response;
           };
       FunctionName:
         Ref: LambdaFuncName
       Handler: index.handler
       Runtime: nodejs12.x
       Role: !GetAtt IAMRole.Arn
-    DependsOn:
-      - DynamoDBTable
-  DynamoDBTable:
-    Type: 'AWS::DynamoDB::Table'
-    Properties:
-      TableName: Dynamo_api-lambda-db
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
-      ProvisionedThroughput:
-        ReadCapacityUnits: '5'
-        WriteCapacityUnits: '5'
-    DependsOn:
-      - IAMRole
+    # DependsOn:
+    #   - DynamoDBTable
+  # DynamoDBTable:
+  #   Type: 'AWS::DynamoDB::Table'
+  #   Properties:
+  #     TableName: Dynamo_api-lambda-db
+  #     AttributeDefinitions:
+  #       - AttributeName: id
+  #         AttributeType: S
+  #     KeySchema:
+  #       - AttributeName: id
+  #         KeyType: HASH
+  #     ProvisionedThroughput:
+  #       ReadCapacityUnits: '5'
+  #       WriteCapacityUnits: '5'
+  #   DependsOn:
+  #     - IAMRole
   IAMRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -119,7 +100,7 @@ Resources:
         Ref: LambdaFuncName
     DependsOn:
       - APIGatewayRestAPI
-  APIGatewayMethod:
+  APIGatewayMethodPost:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       AuthorizerId: !Ref ApiGatewayAuthorizer
@@ -140,6 +121,26 @@ Resources:
           - LambdaFuncNameArn: !GetAtt LambdaFunction.Arn
     DependsOn:
       - APIGatewayResource
+  APIGatewayMethodGet:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResource
+      HttpMethod: GET
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
+          - LambdaFuncNameArn: !GetAtt LambdaFunction.Arn
+    DependsOn:
+      - APIGatewayResource
   APIGatewayDeployment:
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
@@ -147,7 +148,8 @@ Resources:
       StageName:
         Ref: EnvironmentName
     DependsOn:
-      - APIGatewayMethod
+      - APIGatewayMethodPost
+      - APIGatewayMethodGet
   APIGatewayPermission:
     Type: 'AWS::Lambda::Permission'
     Properties:
