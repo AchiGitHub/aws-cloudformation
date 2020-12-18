@@ -16,36 +16,54 @@ Resources:
     Properties:
       Code:
         ZipFile: |
-          exports.handler = async (event) => {
-              // TODO implement
+          var AWS = require('aws-sdk');
+          var dynamoDb = new AWS.DynamoDB.DocumentClient();
+          exports.handler = (event, context, callback) => {
+            const params = {
+              TableName: "Dynamo_api-lambda-db",
+              Item: {
+                id: context.awsRequestId,
+                productName: event.productName,
+                createdAt: Date.now()
+              }
+            };
+            dynamoDb.put(params, (error, data) => {
+              if(error){
+                const response = {
+                  statusCode: 500,
+                  body: error
+                }
+                callback(null, response);
+                return;
+              }
               const response = {
-                  statusCode: 200,
-                  body: JSON.stringify('Hello from Lambda!'),
+                statusCode: 200
               };
-              return response;
-          };
+              callback(null, response)
+            });
+          }
       FunctionName:
         Ref: LambdaFuncName
       Handler: index.handler
       Runtime: nodejs12.x
       Role: !GetAtt IAMRole.Arn
-    # DependsOn:
-    #   - DynamoDBTable
-  # DynamoDBTable:
-  #   Type: 'AWS::DynamoDB::Table'
-  #   Properties:
-  #     TableName: Dynamo_api-lambda-db
-  #     AttributeDefinitions:
-  #       - AttributeName: id
-  #         AttributeType: S
-  #     KeySchema:
-  #       - AttributeName: id
-  #         KeyType: HASH
-  #     ProvisionedThroughput:
-  #       ReadCapacityUnits: '5'
-  #       WriteCapacityUnits: '5'
-  #   DependsOn:
-  #     - IAMRole
+    DependsOn:
+      - DynamoDBTable
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: Dynamo_api-lambda-db
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+    DependsOn:
+      - IAMRole
   IAMRole:
     Type: 'AWS::IAM::Role'
     Properties:
