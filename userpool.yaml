@@ -4,14 +4,18 @@ Parameters:
   AuthName:
     Type: String
     Description: test-cloudformation-userpool
-  LambdaFuncName:
+  LambdaPostProduct:
     Type: String
-    Default: Lambda_api-lambda-db
+    Default: Lambda-post-products
+  LambdaGetProducts:
+    Type: String
+    Default: Lambda-get-products
   EnvironmentName:
     Type: String
     Default: Prod
 Resources:
-  LambdaFunction:
+  #Create the NodeJS lambda function to create a POST request to DynamoDB
+  LambdaPostFunction:
     Type: 'AWS::Lambda::Function'
     Properties:
       Code:
@@ -20,7 +24,7 @@ Resources:
           var dynamoDb = new AWS.DynamoDB.DocumentClient();
           exports.handler = (event, context, callback) => {
             const params = {
-              TableName: "Dynamo_api-lambda-db",
+              TableName: "Dynamo-DB-Lambda-API",
               Item: {
                 id: context.awsRequestId,
                 productName: event.productName,
@@ -37,22 +41,60 @@ Resources:
                 return;
               }
               const response = {
-                statusCode: 200
+                statusCode: 200,
+                data: data
               };
               callback(null, response)
             });
           }
       FunctionName:
-        Ref: LambdaFuncName
+        Ref: LambdaPostProduct
       Handler: index.handler
       Runtime: nodejs12.x
       Role: !GetAtt IAMRole.Arn
     DependsOn:
       - DynamoDBTable
+  #Create the NodeJS lambda function to create a GET request to DynamoDB
+  LambdaGetFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          var AWS = require('aws-sdk');
+          var dynamoDb = new AWS.DynamoDB.DocumentClient();
+          exports.handler = (event, context, callback) => {
+            const params = {
+              TableName: "Dynamo-DB-Lambda-API",
+              Select: "ALL_ATTRIBUTES"
+            };
+            dynamoDb.scan(params, (error, data) => {
+              if(error){
+                const response = {
+                  statusCode: 500,
+                  body: error
+                }
+                callback(null, response);
+                return;
+              }
+              const response = {
+                statusCode: 200,
+                body: JSON.stringify(data)
+              };
+              callback(null, response)
+            });
+          }
+      FunctionName:
+        Ref: LambdaGetProducts
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: !GetAtt IAMRole.Arn
+    DependsOn:
+      - DynamoDBTable
+  #Create the the dynamoDB instance
   DynamoDBTable:
     Type: 'AWS::DynamoDB::Table'
     Properties:
-      TableName: Dynamo_api-lambda-db
+      TableName: Dynamo-DB-Lambda-API
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -64,6 +106,7 @@ Resources:
         WriteCapacityUnits: '5'
     DependsOn:
       - IAMRole
+  #An IAM role is required to create Lambda, DynamoDB services
   IAMRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -78,7 +121,7 @@ Resources:
               - 'sts:AssumeRole'
       Path: /
       Policies:
-        - PolicyName: Policy_api-lambda-db
+        - PolicyName: Policy-API-Lambda-DB
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -101,12 +144,15 @@ Resources:
                   - 'logs:CreateLogGroup'
                   - 'logs:PutLogEvents'
                 Resource: '*'
+  #Creates a REST API
   APIGatewayRestAPI:
     Type: 'AWS::ApiGateway::RestApi'
     Properties:
-      Name: API_api-lambda-db
+      Name: API-Lambda-DB
     DependsOn:
-      - LambdaFunction
+      - LambdaPostFunction
+      - LambdaGetFunction
+  #Creates a resource in an API
   APIGatewayResource:
     Type: 'AWS::ApiGateway::Resource'
     Properties:
@@ -115,9 +161,10 @@ Resources:
         - APIGatewayRestAPI
         - RootResourceId
       PathPart:
-        Ref: LambdaFuncName
+        Ref: LambdaPostProduct
     DependsOn:
       - APIGatewayRestAPI
+  #Creates API Gateway methods that define the parameters and body that clients must send in their requests
   APIGatewayMethodPost:
     Type: 'AWS::ApiGateway::Method'
     Properties:
@@ -136,7 +183,7 @@ Resources:
         Uri: !Sub
           - >-
             arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
-          - LambdaFuncNameArn: !GetAtt LambdaFunction.Arn
+          - LambdaFuncNameArn: !GetAtt LambdaPostFunction.Arn
     DependsOn:
       - APIGatewayResource
   APIGatewayMethodGet:
@@ -156,9 +203,10 @@ Resources:
         Uri: !Sub
           - >-
             arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
-          - LambdaFuncNameArn: !GetAtt LambdaFunction.Arn
+          - LambdaFuncNameArn: !GetAtt LambdaGetFunction.Arn
     DependsOn:
       - APIGatewayResource
+  #Deploys an API Gateway RestApi resource to a stage so that clients can call the API over the internet. The stage acts as an environment.
   APIGatewayDeployment:
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
@@ -168,14 +216,28 @@ Resources:
     DependsOn:
       - APIGatewayMethodPost
       - APIGatewayMethodGet
+  #Grants an AWS service or another account permission to use a function. 
+  #You can apply the policy at the function level, or specify a qualifier to restrict access to a single version or alias. 
+  #If you use a qualifier, the invoker must use the full Amazon Resource Name (ARN) of that version or alias to invoke the function.
+  #2 Permissions are allowed since im implementing 2 API requests - GET/POST
   APIGatewayPermission:
     Type: 'AWS::Lambda::Permission'
     Properties:
       Action: 'lambda:InvokeFunction'
-      FunctionName: !GetAtt LambdaFunction.Arn
+      FunctionName: !GetAtt LambdaPostFunction.Arn
       Principal: apigateway.amazonaws.com
     DependsOn:
       - APIGatewayDeployment
+  APIGatewayGetPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaGetFunction.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+  #Creates an authorization layer that API Gateway activates for methods that have authorization enabled. 
+  #API Gateway activates the authorizer when a client calls those methods.
   ApiGatewayAuthorizer:
       DependsOn:
         - APIGatewayRestAPI
@@ -188,6 +250,7 @@ Resources:
         Type: COGNITO_USER_POOLS
         ProviderARNs:
           - Fn::GetAtt: [UserPool, Arn]
+  #Creates an Amazon Cognito user pool
   UserPool:
     Type: "AWS::Cognito::UserPool"
     Properties:
@@ -205,6 +268,7 @@ Resources:
           AttributeDataType: String
           Mutable: false
           Required: true
+  #Specifies an Amazon Cognito user pool client
   UserPoolClient:
     Type: "AWS::Cognito::UserPoolClient"
     Properties:
@@ -226,6 +290,7 @@ Resources:
         - http://localhost:3000/signedout
       SupportedIdentityProviders:
         - COGNITO
+  #Creates a new domain for a user pool
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
